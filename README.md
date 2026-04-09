@@ -109,7 +109,7 @@ This is currently a personal experimental project, but feedback, ideas, and sugg
 <h2>📄 License</h2>
 
 <p>
-Add your preferred license here, for example MIT.
+If you fork, just let me know. I wanna see what cool shit you created out of it.
 </p>
 
 <h2>👤 Author</h2>
