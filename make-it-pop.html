@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Make It Pop! — The Designer Survival Simulator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Fredoka', sans-serif;
+        }
+
+        /* ─────────────────────────────────────────────
+         * SCENE CONTAINER
+         * Locks to the 2000×1116 aspect ratio.
+         * Uniform scale (contain-style), centered,
+         * black letterboxing on overflow edges.
+         * ───────────────────────────────────────────── */
+        #scene {
+            position: absolute;
+            /* JS will set width/height/top/left to maintain 2000:1116 */
+        }
+
+        /* Background image — fills scene exactly */
+        #bg-image {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 1;
+        }
+
+        /* ─────────────────────────────────────────────
+         * SCREEN OVERLAY — the game lives here
+         * Mapped to the red rectangle:
+         *   left: 22.30%  top: 7.53%
+         *   width: 55.35%  height: 44.09%
+         * ───────────────────────────────────────────── */
+        #screen-overlay {
+            position: absolute;
+            left: 22.30%;
+            top: 7.53%;
+            width: 55.35%;
+            height: 44.09%;
+            overflow: hidden;
+            background: #0d1117;
+            z-index: 5;
+            border-radius: 4px;
+            box-shadow: inset 0 0 60px rgba(0,0,0,0.5);
+        }
+
+        /* CRT scanlines */
+        #screen-overlay::before {
+            content: '';
+            position: absolute; inset: 0;
+            background: repeating-linear-gradient(
+                0deg, transparent, transparent 2px,
+                rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px
+            );
+            pointer-events: none; z-index: 100;
+        }
+
+        /* Vignette */
+        #screen-overlay::after {
+            content: '';
+            position: absolute; inset: 0;
+            background: radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(0,0,0,0.3) 100%);
+            pointer-events: none; z-index: 100;
+        }
+
+        /* ─────────────────────────────────────────────
+         * CHARACTER LAYERS — on top of everything
+         * All are full-scene-size images with transparency
+         * ───────────────────────────────────────────── */
+        #player-body {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 12;
+            pointer-events: none;
+        }
+
+        #player-left-arm {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 9;
+            pointer-events: none;
+            /* Pivot at shoulder: ~39.55%, 61.7% of image */
+            transform-origin: 39.55% 61.7%;
+        }
+
+        #player-right-arm {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 9;
+            pointer-events: none;
+            /* Pivot at shoulder: ~58.95%, 60.0% of image */
+            transform-origin: 58.95% 60.0%;
+        }
+
+        /* ─────────────────────────────────────────────
+         * GAME UI INSIDE #screen-overlay
+         * ───────────────────────────────────────────── */
+        #game-area {
+            position: absolute; inset: 0;
+            overflow: hidden;
+        }
+
+        #hud {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 14px 0 48px;
+            background: linear-gradient(180deg, rgba(13,17,23,0.92) 0%, rgba(13,17,23,0.6) 80%, transparent 100%);
+            z-index: 50;
+            font-family: 'Space Mono', monospace;
+            font-size: 12px;
+            color: #8b949e;
+        }
+
+        .hud-group { display: flex; align-items: center; gap: 20px; }
+        .hud-item { display: flex; align-items: center; gap: 6px; }
+        .hud-label { font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.6; }
+        .hud-value { font-weight: 700; font-size: 14px; color: #e6edf3; }
+        #time-display { color: #58a6ff; }
+        #combo-display { color: #f0883e; }
+        #score-display { color: #3fb950; }
+
+        #stress-bar-container {
+            position: absolute;
+            top: 50px; left: 8px; bottom: 12px; width: 26px;
+            background: rgba(255,255,255,0.04);
+            border-radius: 13px; z-index: 50;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.06);
+        }
+
+        #stress-bar-fill {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            height: 0%;
+            background: linear-gradient(0deg, #3fb950, #f0883e 50%, #f85149 100%);
+            border-radius: 13px;
+            transition: height 0.3s ease;
+        }
+
+        #stress-pct {
+            position: absolute; bottom: 4px; width: 100%; text-align: center;
+            font-family: 'Space Mono', monospace; font-size: 8px; font-weight: 700;
+            color: rgba(255,255,255,0.5); z-index: 2;
+        }
+
+        /* TASKS */
+        .task {
+            position: absolute; border-radius: 50%;
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer; color: white; font-weight: 700;
+            font-size: 13px; font-family: 'Space Mono', monospace;
+            letter-spacing: 0.5px; z-index: 20;
+            transition: transform 0.08s ease;
+            animation: taskPop 0.2s cubic-bezier(0.34,1.56,0.64,1) forwards;
+        }
+        .task:active { transform: scale(0.9); }
+
+        @keyframes taskPop { 0%{transform:scale(0);opacity:0}100%{transform:scale(1);opacity:1} }
+        @keyframes taskUrgent { 0%,100%{box-shadow:0 0 0 0 rgba(255,100,100,0)}50%{box-shadow:0 0 0 8px rgba(255,100,100,0.3)} }
+
+        .task-click {
+            background: linear-gradient(135deg, #f85149, #e91e63);
+            width: 76px; height: 76px;
+            box-shadow: 0 4px 16px rgba(232,30,99,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+        }
+        .task-hold {
+            background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+            width: 88px; height: 88px;
+            box-shadow: 0 4px 16px rgba(139,92,246,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+        }
+        .task-hold.holding { animation: holdPulse 0.6s ease infinite; }
+        @keyframes holdPulse { 0%,100%{transform:scale(1)}50%{transform:scale(1.12)} }
+        .task-expire { animation: taskExpire 0.3s ease forwards; }
+        @keyframes taskExpire { 0%{transform:scale(1);opacity:1}100%{transform:scale(1.5);opacity:0} }
+
+        /* SLACK */
+        #slack-container {
+            position: absolute; bottom: 10px; right: 10px; width: 210px;
+            display: flex; flex-direction: column-reverse; gap: 6px;
+            z-index: 40; pointer-events: none;
+        }
+
+        .slack-popup {
+            background: rgba(255,255,255,0.95); color: #1a1a2e;
+            border-left: 4px solid #e01e5a; border-radius: 0 8px 8px 0;
+            padding: 8px 10px; font-size: 11px; font-family: 'Fredoka', sans-serif;
+            pointer-events: auto; position: relative;
+            animation: slackSlide 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        @keyframes slackSlide { 0%{transform:translateX(110%);opacity:0}100%{transform:translateX(0);opacity:1} }
+        .slack-popup .slack-sender { font-weight: 700; font-size: 10px; color: #e01e5a; margin-bottom: 2px; }
+        .slack-popup .slack-close {
+            position: absolute; top: 4px; right: 6px; cursor: pointer;
+            color: #aaa; font-size: 14px; font-weight: 700; line-height: 1;
+            transition: color 0.15s;
+        }
+        .slack-popup .slack-close:hover { color: #e01e5a; }
+        .slack-fade { animation: slackFade 0.4s ease forwards; }
+        @keyframes slackFade { to{transform:translateX(110%);opacity:0} }
+
+        /* COMBO FLASH */
+        .combo-flash {
+            position: absolute; font-family: 'Fredoka', sans-serif; font-weight: 700;
+            font-size: 18px; color: #f0883e; text-shadow: 0 0 10px rgba(240,136,62,0.6);
+            pointer-events: none; z-index: 60;
+            animation: comboFloat 0.8s ease forwards;
+        }
+        @keyframes comboFloat { 0%{transform:translateY(0) scale(1);opacity:1}100%{transform:translateY(-40px) scale(1.3);opacity:0} }
+
+        /* START SCREEN */
+        #start-screen {
+            position: absolute; inset: 0;
+            background: radial-gradient(ellipse at center, rgba(13,17,23,0.85) 0%, rgba(13,17,23,0.98) 100%);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 200; gap: 16px;
+        }
+
+        #start-screen h1 {
+            font-family: 'Fredoka', sans-serif;
+            font-size: clamp(22px, 4vw, 42px); font-weight: 700;
+            background: linear-gradient(135deg, #f85149, #f0883e, #8b5cf6, #58a6ff);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text; text-align: center; line-height: 1.1;
+        }
+
+        #start-screen .subtitle {
+            font-family: 'Space Mono', monospace;
+            font-size: clamp(9px, 1.2vw, 13px); color: #8b949e;
+            letter-spacing: 2px; text-transform: uppercase; text-align: center;
+        }
+
+        #start-screen .instructions {
+            margin-top: 8px; display: flex; gap: 16px;
+            font-size: clamp(9px, 1.1vw, 12px); color: #8b949e;
+            font-family: 'Space Mono', monospace;
+        }
+        .instruction-item { display: flex; align-items: center; gap: 6px; }
+        .instruction-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+        .dot-click { background: linear-gradient(135deg, #f85149, #e91e63); }
+        .dot-hold { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
+        .dot-slack { background: #e01e5a; border-radius: 3px; }
+
+        #start-btn {
+            margin-top: 12px; padding: 12px 36px; border: none; border-radius: 30px;
+            background: linear-gradient(135deg, #f85149, #e91e63); color: white;
+            font-family: 'Fredoka', sans-serif; font-size: clamp(14px, 1.8vw, 18px);
+            font-weight: 600; cursor: pointer;
+            box-shadow: 0 4px 24px rgba(232,30,99,0.4); letter-spacing: 1px;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        #start-btn:hover { transform: scale(1.06); box-shadow: 0 6px 32px rgba(232,30,99,0.6); }
+        #start-btn:active { transform: scale(0.96); }
+
+        /* BSOD */
+        #bsod-screen {
+            position: absolute; inset: 0; background: #0078d7;
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 300; padding: 30px; text-align: center;
+        }
+        #bsod-screen .bsod-face { font-size: clamp(40px, 8vw, 80px); margin-bottom: 12px; color: white; }
+        #bsod-screen h2 { font-family: 'Fredoka', sans-serif; font-size: clamp(16px, 2.5vw, 26px); font-weight: 600; color: white; margin-bottom: 8px; }
+        #bsod-screen p { font-family: 'Space Mono', monospace; font-size: clamp(9px, 1.2vw, 13px); color: rgba(255,255,255,0.7); max-width: 400px; line-height: 1.5; }
+        #bsod-screen .final-score { margin-top: 16px; font-family: 'Fredoka', sans-serif; font-size: clamp(14px, 2vw, 22px); font-weight: 700; color: white; }
+        #bsod-screen button {
+            margin-top: 16px; padding: 10px 30px; border: 2px solid white; border-radius: 30px;
+            background: transparent; color: white; font-family: 'Fredoka', sans-serif;
+            font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+        }
+        #bsod-screen button:hover { background: white; color: #0078d7; }
+
+        /* VICTORY */
+        #victory-screen {
+            position: absolute; inset: 0;
+            background: radial-gradient(ellipse at center, rgba(63,185,80,0.15), rgba(13,17,23,0.98) 100%);
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 300; padding: 30px; text-align: center;
+        }
+        #victory-screen .victory-emoji { font-size: clamp(40px, 8vw, 80px); margin-bottom: 10px; }
+        #victory-screen h2 {
+            font-family: 'Fredoka', sans-serif; font-size: clamp(18px, 3vw, 32px); font-weight: 700;
+            background: linear-gradient(135deg, #3fb950, #58a6ff);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        #victory-screen p { font-family: 'Space Mono', monospace; font-size: clamp(9px, 1.2vw, 13px); color: #8b949e; margin-top: 6px; }
+        #victory-screen .final-score { margin-top: 12px; font-family: 'Fredoka', sans-serif; font-size: clamp(16px, 2.5vw, 28px); font-weight: 700; color: #3fb950; }
+        #victory-screen button {
+            margin-top: 16px; padding: 10px 30px; border: none; border-radius: 30px;
+            background: linear-gradient(135deg, #3fb950, #2ea043); color: white;
+            font-family: 'Fredoka', sans-serif; font-size: 14px; font-weight: 600; cursor: pointer;
+            box-shadow: 0 4px 24px rgba(63,185,80,0.4); transition: transform 0.15s;
+        }
+        #victory-screen button:hover { transform: scale(1.06); }
+
+        .stress-warning { animation: stressFlash 0.5s ease; }
+        @keyframes stressFlash { 0%,100%{box-shadow:inset 0 0 0 0 transparent}50%{box-shadow:inset 0 0 40px rgba(248,81,73,0.25)} }
+    </style>
+</head>
+<body>
+    <!-- SCENE: uniform-scaled 2000×1116 container -->
+    <div id="scene">
+        <!-- Layer 1: Background (desk, monitor bezel, room) -->
+        <img id="bg-image" src="AI_UnrealWorkDay_BG_Red.png" draggable="false">
+
+        <!-- Layer 2: Game inside the monitor -->
+        <div id="screen-overlay">
+            <div id="start-screen">
+                <h1>Make It Pop!</h1>
+                <div class="subtitle">The Designer Survival Simulator</div>
+                <div class="instructions">
+                    <div class="instruction-item"><div class="instruction-dot dot-click"></div> Tap</div>
+                    <div class="instruction-item"><div class="instruction-dot dot-hold"></div> Hold</div>
+                    <div class="instruction-item"><div class="instruction-dot dot-slack"></div> Dismiss</div>
+                </div>
+                <button id="start-btn">START SHIFT</button>
+            </div>
+            <div id="hud">
+                <div class="hud-group">
+                    <div class="hud-item"><span class="hud-label">TIME</span><span class="hud-value" id="time-display">9:00 AM</span></div>
+                </div>
+                <div class="hud-group">
+                    <div class="hud-item"><span class="hud-label">COMBO</span><span class="hud-value" id="combo-display">x0</span></div>
+                    <div class="hud-item"><span class="hud-label">SCORE</span><span class="hud-value" id="score-display">0</span></div>
+                </div>
+            </div>
+            <div id="stress-bar-container">
+                <div id="stress-bar-fill"></div>
+                <span id="stress-pct">0%</span>
+            </div>
+            <div id="game-area"></div>
+            <div id="slack-container"></div>
+            <div id="bsod-screen">
+                <div class="bsod-face">:(</div>
+                <h2>BURNOUT DETECTED</h2>
+                <p>Your stress hit 100%. The designer has rage-quit. Task MAKE_IT_POP.exe has stopped responding.</p>
+                <div class="final-score">Score: <span id="bsod-score">0</span></div>
+                <button onclick="location.reload()">TRY AGAIN</button>
+            </div>
+            <div id="victory-screen">
+                <div class="victory-emoji">🎉</div>
+                <h2>YOU SURVIVED!</h2>
+                <p>5:00 PM — Time to clock out. You made it pop.</p>
+                <div class="final-score">Final Score: <span id="victory-score">0</span></div>
+                <button onclick="location.reload()">PLAY AGAIN</button>
+            </div>
+        </div>
+
+        <!-- Layer 3: Player body (on top of game + background) -->
+        <img id="player-body" src="AI_UnrealWorkDay_PlayerBody.png" draggable="false">
+
+        <!-- Layer 4: Arms (on top of everything) -->
+        <img id="player-left-arm" src="AI_UnrealWorkDay_Player_L_Arm.png" draggable="false">
+        <img id="player-right-arm" src="AI_UnrealWorkDay_Player_R_Arm.png" draggable="false">
+    </div>
+
+    <script>
+    /* ═══════════════════════════════════════════════════════════════
+     *  SCENE SCALING
+     *  Uniform-scale the 2000×1116 scene to fit the viewport
+     *  (contain behavior), centered with black letterboxing.
+     * ═══════════════════════════════════════════════════════════════ */
+    (function() {
+        const scene = document.getElementById('scene');
+        const NATIVE_W = 2000, NATIVE_H = 1116;
+        const ASPECT = NATIVE_W / NATIVE_H;
+
+        function resize() {
+            const vw = window.innerWidth, vh = window.innerHeight;
+            let w, h;
+            if (vw / vh > ASPECT) {
+                // Viewport is wider — fit to height
+                h = vh;
+                w = vh * ASPECT;
+            } else {
+                // Viewport is taller — fit to width
+                w = vw;
+                h = vw / ASPECT;
+            }
+            scene.style.width = w + 'px';
+            scene.style.height = h + 'px';
+            scene.style.left = ((vw - w) / 2) + 'px';
+            scene.style.top = ((vh - h) / 2) + 'px';
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+    })();
+
+    /* ═══════════════════════════════════════════════════════════════
+     *  ARM ANIMATION
+     * ═══════════════════════════════════════════════════════════════ */
+    (function() {
+        const leftArm = document.getElementById('player-left-arm');
+        const rightArm = document.getElementById('player-right-arm');
+
+        // ── Left arm: random typing motion ──
+        let leftAngle = 0;
+        let leftTarget = 0;
+        let leftTimer = 0;
+
+        function animateLeftArm() {
+            leftTimer++;
+            // Pick a new random target every ~15 frames (~250ms at 60fps)
+            if (leftTimer % 15 === 0) {
+                leftTarget = (Math.random() - 0.5) * 8; // -4 to +4 degrees
+            }
+            // Ease toward target
+            leftAngle += (leftTarget - leftAngle) * 0.15;
+            leftArm.style.transform = `rotate(${leftAngle}deg)`;
+            requestAnimationFrame(animateLeftArm);
+        }
+        animateLeftArm();
+
+        // ── Right arm: follows mouse ──
+        let mouseX = window.innerWidth / 2;
+        let mouseY = window.innerHeight / 2;
+        let rightAngle = 0;
+
+        document.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+
+        function animateRightArm() {
+            // Map mouse position to a small rotation range
+            // Center of viewport = 0 degrees
+            const scene = document.getElementById('scene');
+            const rect = scene.getBoundingClientRect();
+            // Normalize mouse within scene: 0 = left, 1 = right
+            const nx = (mouseX - rect.left) / rect.width;
+            const ny = (mouseY - rect.top) / rect.height;
+
+            // Map to rotation: center = 0, edges = ±6 degrees
+            const targetAngle = ((nx - 0.5) * 10) + ((ny - 0.5) * 4);
+            // Smooth it
+            rightAngle += (targetAngle - rightAngle) * 0.08;
+            rightArm.style.transform = `rotate(${rightAngle}deg)`;
+            requestAnimationFrame(animateRightArm);
+        }
+        animateRightArm();
+    })();
+
+    /* ═══════════════════════════════════════════════════════════════
+     *  BEAT MUSIC — Web Audio API procedural beats
+     *  Starts chill, gets more intense as stress rises.
+     * ═══════════════════════════════════════════════════════════════ */
+    let audioCtx = null;
+    let musicPlaying = false;
+
+    function initMusic() {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        musicPlaying = true;
+        playBeatLoop();
+    }
+
+    function playBeatLoop() {
+        if (!audioCtx || !musicPlaying) return;
+
+        const now = audioCtx.currentTime;
+        // Tempo increases with stress: 100 BPM at 0 stress → 160 BPM at 100
+        const bpm = 100 + stress * 0.6;
+        const beatLen = 60 / bpm;
+        const barLen = beatLen * 4;
+
+        // Master gain
+        const master = audioCtx.createGain();
+        master.gain.value = 0.35;
+        master.connect(audioCtx.destination);
+
+        // ── Kick drum (every beat, accent on 1 and 3) ──
+        for (let i = 0; i < 4; i++) {
+            const t = now + i * beatLen;
+            const accent = (i === 0 || i === 2) ? 1.0 : 0.5;
+            playKick(t, accent, master);
+        }
+
+        // ── Hi-hat (8th notes, louder as stress rises) ──
+        const hatVol = 0.08 + stress * 0.002;
+        for (let i = 0; i < 8; i++) {
+            const t = now + i * (beatLen / 2);
+            const accent = (i % 2 === 0) ? 1.0 : 0.6;
+            playHat(t, hatVol * accent, master);
+        }
+
+        // ── Snare on 2 and 4 ──
+        playSnare(now + beatLen, 0.3, master);
+        playSnare(now + 3 * beatLen, 0.3, master);
+
+        // ── Extra 16th note hats at high stress ──
+        if (stress > 40) {
+            const extraVol = 0.04 + (stress - 40) * 0.001;
+            for (let i = 0; i < 16; i++) {
+                if (i % 2 === 1) { // offbeats only
+                    playHat(now + i * (beatLen / 4), extraVol, master);
+                }
+            }
+        }
+
+        // ── Bass synth on beat 1 (deeper/louder with stress) ──
+        playBass(now, 0.15 + stress * 0.002, master);
+        if (stress > 50) {
+            playBass(now + 2 * beatLen, 0.1 + stress * 0.001, master);
+        }
+
+        // Schedule next bar
+        setTimeout(() => playBeatLoop(), barLen * 1000 - 50);
+    }
+
+    function playKick(time, accent, dest) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150 * accent, time);
+        osc.frequency.exponentialRampToValueAtTime(30, time + 0.12);
+        gain.gain.setValueAtTime(0.7 * accent, time);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
+        osc.connect(gain);
+        gain.connect(dest);
+        osc.start(time);
+        osc.stop(time + 0.2);
+    }
+
+    function playSnare(time, vol, dest) {
+        // Noise burst
+        const bufferSize = audioCtx.sampleRate * 0.1;
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1);
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buffer;
+        const noiseGain = audioCtx.createGain();
+        noiseGain.gain.setValueAtTime(vol, time);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+        // Bandpass
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 3000 + stress * 20;
+        noise.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(dest);
+        noise.start(time);
+        noise.stop(time + 0.1);
+
+        // Tonal body
+        const osc = audioCtx.createOscillator();
+        const oscGain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(180, time);
+        osc.frequency.exponentialRampToValueAtTime(80, time + 0.05);
+        oscGain.gain.setValueAtTime(vol * 0.6, time);
+        oscGain.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
+        osc.connect(oscGain);
+        oscGain.connect(dest);
+        osc.start(time);
+        osc.stop(time + 0.08);
+    }
+
+    function playHat(time, vol, dest) {
+        const bufferSize = audioCtx.sampleRate * 0.04;
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1);
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buffer;
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(vol, time);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.03);
+        const hp = audioCtx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.value = 7000;
+        noise.connect(hp);
+        hp.connect(gain);
+        gain.connect(dest);
+        noise.start(time);
+        noise.stop(time + 0.04);
+    }
+
+    function playBass(time, vol, dest) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        // Bass note gets lower and grittier with stress
+        const freq = 55 - stress * 0.1;
+        osc.frequency.setValueAtTime(Math.max(35, freq), time);
+        gain.gain.setValueAtTime(vol, time);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
+        const lp = audioCtx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 200 + stress * 3;
+        osc.connect(lp);
+        lp.connect(gain);
+        gain.connect(dest);
+        osc.start(time);
+        osc.stop(time + 0.3);
+    }
+
+    function stopMusic() {
+        musicPlaying = false;
+        if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+     *  GAME LOGIC
+     * ═══════════════════════════════════════════════════════════════ */
+    let gameActive = false, time = 9 * 60, stress = 0, combo = 0, score = 0, timeLoopInt;
+
+    const gameArea       = document.getElementById('game-area');
+    const slackContainer = document.getElementById('slack-container');
+    const startScreen    = document.getElementById('start-screen');
+    const bsodScreen     = document.getElementById('bsod-screen');
+    const victoryScreen  = document.getElementById('victory-screen');
+    const timeDisplay    = document.getElementById('time-display');
+    const comboDisplay   = document.getElementById('combo-display');
+    const scoreDisplay   = document.getElementById('score-display');
+    const stressFill     = document.getElementById('stress-bar-fill');
+    const stressPct      = document.getElementById('stress-pct');
+    const screenOverlay  = document.getElementById('screen-overlay');
+
+    const slackMessages = [
+        { sender: 'Boss', text: 'Can you make it pop more?' },
+        { sender: 'Client', text: 'I\'ll know it when I see it.' },
+        { sender: 'PM', text: 'Can we try it in blue?' },
+        { sender: 'CEO', text: 'My nephew could do this.' },
+        { sender: 'Marketing', text: 'Make the logo bigger.' },
+        { sender: 'Intern', text: 'Have you tried Canva?' },
+        { sender: 'Client', text: 'Use more Comic Sans.' },
+        { sender: 'Boss', text: 'This needs more synergy.' },
+        { sender: 'PM', text: 'Can we A/B test the font?' },
+        { sender: 'Client', text: 'I want it minimalist but loud.' },
+        { sender: 'HR', text: 'Mandatory fun meeting at 3.' },
+        { sender: 'Boss', text: 'Make it look more… techy.' },
+        { sender: 'Client', text: 'My wife doesn\'t like the color.' },
+    ];
+
+    function updateUI() {
+        const hours = Math.floor(time / 60), mins = time % 60;
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const h = hours > 12 ? hours - 12 : hours;
+        timeDisplay.textContent = `${h}:${String(mins).padStart(2, '0')} ${ampm}`;
+        comboDisplay.textContent = `x${combo}`;
+        comboDisplay.style.color = combo >= 5 ? '#f85149' : '#f0883e';
+        scoreDisplay.textContent = score;
+        stressFill.style.height = stress + '%';
+        stressPct.textContent = Math.round(stress) + '%';
+        if (stress >= 70) stressFill.style.background = 'linear-gradient(0deg, #f85149, #da3633)';
+        else if (stress >= 40) stressFill.style.background = 'linear-gradient(0deg, #f0883e, #f85149)';
+        else stressFill.style.background = 'linear-gradient(0deg, #3fb950, #f0883e 50%, #f85149 100%)';
+        if (stress >= 75) {
+            screenOverlay.classList.add('stress-warning');
+            setTimeout(() => screenOverlay.classList.remove('stress-warning'), 500);
+        }
+    }
+
+    function addStress(amount) {
+        stress += amount;
+        if (stress < 0) stress = 0;
+        if (amount > 0) combo = 0;
+        updateUI();
+        if (stress >= 100) triggerBSOD();
+    }
+
+    function addCombo(x, y) {
+        combo++; score += 10 * combo; addStress(-2);
+        if (combo >= 2) {
+            const flash = document.createElement('div');
+            flash.className = 'combo-flash';
+            flash.textContent = `x${combo}!`;
+            flash.style.left = x + 'px'; flash.style.top = y + 'px';
+            gameArea.appendChild(flash);
+            setTimeout(() => flash.remove(), 800);
+        }
+        updateUI();
+    }
+
+    function spawnSlack() {
+        const msg = slackMessages[Math.floor(Math.random() * slackMessages.length)];
+        const slack = document.createElement('div');
+        slack.className = 'slack-popup';
+        slack.innerHTML = `<div class="slack-sender">${msg.sender}</div><div>${msg.text}</div><span class="slack-close">×</span>`;
+        let timeout = setTimeout(() => {
+            if (slack.parentElement) { slack.classList.add('slack-fade'); setTimeout(() => slack.remove(), 400); }
+        }, 6000);
+        slack.querySelector('.slack-close').onmousedown = (e) => {
+            e.stopPropagation(); clearTimeout(timeout);
+            slack.classList.add('slack-fade'); setTimeout(() => slack.remove(), 300);
+            score += 5; updateUI();
+        };
+        slackContainer.appendChild(slack);
+        while (slackContainer.children.length > 5) slackContainer.firstElementChild.remove();
+    }
+
+    function spawnTask() {
+        if (!gameActive) return;
+        if (Math.random() > 0.7) { spawnSlack(); return; }
+
+        const isHold = Math.random() > 0.7;
+        const task = document.createElement('div');
+        task.className = 'task ' + (isHold ? 'task-hold' : 'task-click');
+
+        const areaRect = gameArea.getBoundingClientRect();
+        const size = isHold ? 88 : 76;
+        const maxX = areaRect.width - size - 50;
+        const maxY = areaRect.height - size - 10;
+        const minX = 42, minY = 50;
+
+        task.style.left = (minX + Math.random() * (maxX - minX)) + 'px';
+        task.style.top = (minY + Math.random() * (maxY - minY)) + 'px';
+        task.innerHTML = isHold ? 'HOLD' : 'CLICK';
+
+        let urgencyTimeout = setTimeout(() => {
+            if (task.parentElement) task.style.animation = 'taskUrgent 0.4s ease infinite';
+        }, 1200);
+
+        let timeout = setTimeout(() => {
+            if (task.parentElement) {
+                clearTimeout(urgencyTimeout);
+                task.classList.add('task-expire');
+                setTimeout(() => task.remove(), 300);
+                addStress(15);
+            }
+        }, 2000);
+
+        if (isHold) {
+            let holdTimeout;
+            task.onmousedown = task.ontouchstart = (e) => {
+                e.preventDefault(); task.classList.add('holding');
+                holdTimeout = setTimeout(() => {
+                    clearTimeout(timeout); clearTimeout(urgencyTimeout);
+                    const rect = task.getBoundingClientRect(), aRect = gameArea.getBoundingClientRect();
+                    task.remove(); addCombo(rect.left - aRect.left, rect.top - aRect.top);
+                }, 800);
+            };
+            task.onmouseup = task.onmouseleave = task.ontouchend = () => {
+                task.classList.remove('holding'); clearTimeout(holdTimeout);
+            };
+        } else {
+            task.onmousedown = task.ontouchstart = (e) => {
+                e.preventDefault(); clearTimeout(timeout); clearTimeout(urgencyTimeout);
+                const rect = task.getBoundingClientRect(), aRect = gameArea.getBoundingClientRect();
+                task.remove(); addCombo(rect.left - aRect.left, rect.top - aRect.top);
+            };
+        }
+        gameArea.appendChild(task);
+    }
+
+    function advanceTime() {
+        if (!gameActive) return;
+        time += 1; updateUI();
+        if (time >= 17 * 60) triggerVictory();
+    }
+
+    function startGame() {
+        startScreen.style.display = 'none';
+        gameActive = true; updateUI();
+        initMusic();
+        timeLoopInt = setInterval(advanceTime, 250);
+        function scheduleNextTask() {
+            if (!gameActive) return;
+            spawnTask();
+            const delay = Math.max(300, 600 + Math.random() * 300 - stress * 2);
+            setTimeout(scheduleNextTask, delay);
+        }
+        scheduleNextTask();
+    }
+
+    function triggerBSOD() {
+        gameActive = false; clearInterval(timeLoopInt); stopMusic();
+        document.getElementById('bsod-score').textContent = score;
+        bsodScreen.style.display = 'flex';
+    }
+
+    function triggerVictory() {
+        gameActive = false; clearInterval(timeLoopInt); stopMusic();
+        document.getElementById('victory-score').textContent = score;
+        victoryScreen.style.display = 'flex';
+    }
+
+    document.getElementById('start-btn').addEventListener('click', startGame);
+    updateUI();
+    </script>
+</body>
+</html>
